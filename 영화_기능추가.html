@@ -27,19 +27,15 @@
     .pool { margin-top:22px; }
     .pool-head { margin:0 0 8px; border:0; padding:0; background:transparent; color:var(--muted); font-size:17px; font-weight:700; text-align:left; }
     #pool { border:1.5px dashed var(--line); border-radius:14px; background:#fff; }
-    
-    /* 카드를 상대 위치(relative)로 변경하여 삭제 버튼의 기준점이 되도록 설정 */
-    .card { position:relative; width:98px; min-height:62px; padding:8px; border:1px solid transparent; border-radius:10px; font-size:14px; font-weight:650; line-height:1.35; overflow-wrap:anywhere; color:var(--ink); cursor:grab; text-align:center; }
+    .card-wrap { position:relative; width:98px; }
+    .card { display:block; width:100%; min-height:62px; padding:8px 26px 8px 8px; border:1px solid transparent; border-radius:10px; font-size:14px; font-weight:650; line-height:1.35; overflow-wrap:anywhere; text-align:left; color:var(--ink); cursor:grab; }
     .card[aria-pressed="true"] { outline:3px solid var(--green); outline-offset:2px; }
-    
-    /* 삭제 버튼 스타일 추가 */
-    .delete-btn { position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; background:#dc3545; color:white; border:none; font-size:16px; font-weight:bold; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; z-index:10; }
-    .delete-btn:hover { background:#c82333; }
-    
+    .delete { position:absolute; top:4px; right:4px; width:22px; height:22px; padding:0; border:0; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(36,41,34,.72); color:#fff; font-size:16px; font-weight:800; line-height:1; }
+    .delete:hover { background:#a55239; }
     .count { display:block; font-size:14px; font-weight:600; }
     .note { font-size:13px; color:var(--muted); margin-top:18px; }
     :focus-visible { outline:3px solid #ba613a; outline-offset:3px; }
-    @media(max-width:420px) { .label { width:48px; } .card { width:90px; } .drop { padding:10px; gap:8px; } }
+    @media(max-width:420px) { .label { width:48px; } .card-wrap { width:90px; } .drop { padding:10px; gap:8px; } }
   </style>
 </head>
 <body>
@@ -63,17 +59,6 @@
     const LEVELS = ['S', 'A', 'B', 'C', 'pool'];
     const TITLES = ["기생충","인터스텔라","라라랜드","센과 치히로의 행방불명","어벤져스: 엔드게임","범죄도시","타이타닉","토이 스토리"];
     const COLORS = ["#f2e6dc","#e3eee7","#ede7f6","#fcefd9","#e2ecf4","#f6e3e3"];
-    
-    // 한국어 받침 유무에 따른 '을/를' 반환 함수
-    function getJosa(word) {
-      if (!word) return '를';
-      const lastChar = word.charCodeAt(word.length - 1);
-      // 한글 음절 범위가 아닌 경우 기본값 '를' 반환
-      if (lastChar < 0xAC00 || lastChar > 0xD7A3) return '를';
-      // 받침이 있으면(종성이 0보다 크면) '을', 없으면 '를'
-      return (lastChar - 0xAC00) % 28 > 0 ? '을' : '를';
-    }
-
     const initial = () => ({ nextId: TITLES.length + 1, items: TITLES.map((title,index) => ({ id: 'm' + (index + 1), title, tier: 'pool' })) });
     let state = initial();
     let selected = null;
@@ -82,6 +67,19 @@
       if (stored && Number.isSafeInteger(stored.nextId) && Array.isArray(stored.items)
           && stored.items.every(item => typeof item.id === 'string' && typeof item.title === 'string' && LEVELS.includes(item.tier))) state = stored;
     } catch {}
+    function hasBatchim(text) {
+      const chars = Array.from(String(text).trim()).filter(ch => /[0-9A-Za-z\uAC00-\uD7A3]/.test(ch));
+      const last = chars[chars.length - 1];
+      if (!last) return false;
+      const code = last.charCodeAt(0);
+      if (code >= 0xAC00 && code <= 0xD7A3) return (code - 0xAC00) % 28 !== 0;
+      if (/[0-9]/.test(last)) return '013678'.includes(last);
+      return 'LMNRlmnr'.includes(last);
+    }
+    function withObject(title) {
+      const name = title || '영화';
+      return name + (hasBatchim(name) ? '을' : '를');
+    }
     function showMessage(message) { document.querySelector('#message').textContent = message; }
     function save() {
       try { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -91,57 +89,36 @@
       const item = state.items.find(item => item.id === id);
       if (!item || !LEVELS.includes(tier)) return;
       item.tier = tier; selected = null; save(); render();
-      const title = item.title || '영화';
-      showMessage(title + getJosa(title) + ' 옮겼어요.');
+      showMessage(withObject(item.title) + ' 옮겼어요.');
+    }
+    function remove(id) {
+      const item = state.items.find(item => item.id === id);
+      if (!item) return;
+      state.items = state.items.filter(value => value.id !== id);
+      if (selected === id) selected = null;
+      save(); render();
+      showMessage(withObject(item.title) + ' 삭제했어요.');
     }
     function card(item,index) {
-      // 버튼 내부 버튼 중첩을 방지하기 위해 div로 생성하되 키보드 포커스 속성 유지
-      const element = document.createElement('div');
-      element.className = 'card'; element.draggable = true;
-      element.dataset.id = item.id;
+      const wrap = document.createElement('div');
+      wrap.className = 'card-wrap';
+      const element = document.createElement('button');
+      element.type = 'button'; element.className = 'card'; element.draggable = true;
+      element.textContent = item.title || ' '; element.dataset.id = item.id;
       element.style.backgroundColor = COLORS[index % COLORS.length];
       element.setAttribute('aria-label',item.title || '영화 카드');
       element.setAttribute('aria-pressed',String(selected === item.id));
-      element.setAttribute('role', 'button');
-      element.tabIndex = 0;
-      
-      // 제목 텍스트 노드 추가
-      const titleText = document.createTextNode(item.title || ' ');
-      element.appendChild(titleText);
-      
-      // 삭제 버튼 생성 및 추가
-      const delBtn = document.createElement('button');
-      delBtn.className = 'delete-btn';
-      delBtn.type = 'button';
-      delBtn.textContent = '-';
-      delBtn.setAttribute('aria-label', '영화 삭제');
-      delBtn.addEventListener('click', event => {
-        event.stopPropagation(); // 카드 자체 클릭 방지
-        state.items = state.items.filter(i => i.id !== item.id);
-        if (selected === item.id) selected = null;
-        save(); render();
-        const title = item.title || '영화';
-        showMessage(title + getJosa(title) + ' 삭제했어요.');
-      });
-      element.appendChild(delBtn);
-
       element.addEventListener('click',event => {
         event.stopPropagation(); selected = selected === item.id ? null : item.id; render();
-        const title = item.title || '영화';
-        showMessage(selected ? title + getJosa(title) + ' 선택했어요.' : '선택을 해제했어요.');
+        showMessage(selected ? withObject(item.title) + ' 선택했어요.' : '선택을 해제했어요.');
       });
       element.addEventListener('dragstart',event => { event.dataTransfer.setData('text/plain',item.id); });
-      
-      // 키보드 엔터 키 동작 지원
-      element.addEventListener('keydown', event => {
-        if(event.key === 'Enter') {
-          event.stopPropagation(); selected = selected === item.id ? null : item.id; render();
-          const title = item.title || '영화';
-          showMessage(selected ? title + getJosa(title) + ' 선택했어요.' : '선택을 해제했어요.');
-        }
-      });
-      
-      return element;
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'delete'; del.textContent = '-';
+      del.setAttribute('aria-label',(item.title || '영화') + ' 삭제');
+      del.addEventListener('click',event => { event.stopPropagation(); remove(item.id); });
+      wrap.append(element,del);
+      return wrap;
     }
     function wireDrop(element,tier) {
       element.addEventListener('dragover',event => { event.preventDefault(); element.closest('.row')?.classList.add('over'); });
@@ -172,9 +149,7 @@
       if (!title) { showMessage('영화 제목을 입력해 주세요.'); input.focus(); return; }
       if (state.items.some(item => item.title === title)) { showMessage('이미 있는 영화 제목이에요. 다른 제목을 넣어 주세요.'); return; }
       state.items.push({ id: 'm' + state.nextId++, title, tier: 'pool' });
-      save(); render(); input.value = ''; 
-      showMessage(title + getJosa(title) + ' 추가했어요.'); 
-      input.focus();
+      save(); render(); input.value = ''; showMessage('영화를 추가했어요.'); input.focus();
     });
     document.querySelector('#reset').addEventListener('click',() => {
       state = initial(); selected = null; document.querySelector('#title').value = ''; save(); render(); showMessage('처음 목록으로 돌아왔어요.');
